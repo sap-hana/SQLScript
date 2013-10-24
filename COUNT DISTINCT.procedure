@@ -1,6 +1,8 @@
 /*
 
-The following procedure allows you to calculate the average transaction amount by customer, grouped by merchant name. It is a very expensive calculation because this requires, for each merchant, to calculate the number of distinct customers.
+The following procedure allows you to calculate the average transaction amount by customer,
+grouped by merchant name. It is a very expensive calculation because this requires,
+for each merchant, to calculate the number of distinct customers.
 
 HANA supports ANSI SQL and so it is possible to write:
 
@@ -11,7 +13,9 @@ GROUP BY MERCHANT_NAME;
 
 However this runs in the SQL Engine and performs very badly.
 
-We can optimize this statement by using CE Functions to control the execution. However there is no COUNTDISTINCT CE Function available and so we must aggregate twice - once, including the CUSTOMER_ID, and then we re-aggregate, dropping that column out of the projection.
+We can optimize this statement by using CE Functions to control the execution.
+However there is no COUNTDISTINCT CE Function available and so we must aggregate twice - once,
+including the CUSTOMER_ID, and then we re-aggregate, dropping that column out of the projection.
 
 Whilst this appears to be an expensive calculation, it performs moderately well (2 seconds on 1.5bn rows).
 
