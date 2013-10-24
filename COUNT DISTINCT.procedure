@@ -1,0 +1,56 @@
+/*
+
+The following procedure allows you to calculate the average transaction amount by customer, grouped by merchant name. It is a very expensive calculation because this requires, for each merchant, to calculate the number of distinct customers.
+
+HANA supports ANSI SQL and so it is possible to write:
+
+SELECT MERCHANT_NAME, SUM(TXAMOUNT)/COUNT(DISTINCT CUST_COUNT) AS AVERAGE
+FROM "_SYS_BIC"."package/AV_TRANSACTION”
+WHERE TXDATE BETWEEN ’2012-01-01’ AND ‘2013-01-01’
+GROUP BY MERCHANT_NAME;
+
+However this runs in the SQL Engine and performs very badly.
+
+We can optimize this statement by using CE Functions to control the execution. However there is no COUNTDISTINCT CE Function available and so we must aggregate twice - once, including the CUSTOMER_ID, and then we re-aggregate, dropping that column out of the projection.
+
+Whilst this appears to be an expensive calculation, it performs moderately well (2 seconds on 1.5bn rows).
+
+*/
+
+CREATE TYPE tt_averageTXbyMerchant as table(
+	MERCHANT_NAME char(160),
+	AVERAGE DOUBLE
+);
+
+
+CREATE PROCEDURE SCHEMA.avgTXbyMerchant ( IN start_date DATE, IN end_date DATE, OUT var_out tt_averageTXbyMerchant ) 
+	LANGUAGE SQLSCRIPT SQL SECURITY INVOKER READS SQL DATA AS  
+BEGIN
+ -- Get a reference to the OLAP view and retrieve the fields we require. (incl aggregation)
+lt_trans = CE_OLAP_VIEW("_SYS_BIC"."package/AV_TRANSACTION”,
+				["MERCHANT_NAME", "CUSTOMER_ID", "TXDATE",
+				SUM("TXAMOUNT") AS "SUM",
+				SUM("CUSTOMER_COUNT") AS "CUST_COUNT"
+				]);
+
+-- Filter the result set for the supplied year brackets ONLY.
+lt_trans2 = CE_PROJECTION(:lt_trans, ["MERCHANT_NAME", "CUSTOMER_ID", "TXDATE", "SUM", "CUST_COUNT"], 
+						'
+						"TXDATE" >= '':start_date'' AND
+						"TXDATE" <= '':end_date''
+						'
+						);
+
+-- Following the filter we need to re-aggregate and get a distinct count of customer numbers.
+lt_trans3 = CE_AGGREGATION(:lt_trans2, [SUM("SUM") AS "SUM", COUNT("CUST_COUNT") AS "D_COUNT"], ["MERCHANT_NAME"]);
+
+-- Calculate the average spend per customer using s projection.
+lt_trans4 = CE_PROJECTION(:lt_trans3,["MERCHANT_NAME","SUM","D_COUNT",CE_CALC (
+						'
+						"SUM"/"D_COUNT"
+						' , DOUBLE) AS "AVERAGE"]);			
+
+-- Finally only extract the columns we need.
+var_out = CE_PROJECTION(:lt_trans4, ["MERCHANT_NAME","AVERAGE"]);
+
+END;
